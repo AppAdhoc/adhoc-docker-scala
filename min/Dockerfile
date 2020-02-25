@@ -1,13 +1,12 @@
 FROM debian:8
 
-# Install JDK1.8, MongoDB, Redis
-#TODO: change to use AdoptOpenJDK? not as commercial-ready as Azul zulu.
-RUN echo "Install Java, MongoDB, Redis..." && \
+# Install JDK1.8
+RUN echo "Install Java..." && \
 	(echo "deb http://repos.azulsystems.com/debian stable main" | tee /etc/apt/sources.list.d/zulu.list) && \
 	apt-key adv --keyserver keyserver.ubuntu.com --recv-keys 0xB1998361219BD9C9 && \
 	mkdir -p /var/cache/apt/archives/partial && touch /var/cache/apt/archives/lock && chmod 640 /var/cache/apt/archives/lock && \
 	apt-get install -f && apt-get clean && rm -rf /var/lib/apt/lists/* && apt-get update -y && \
-	apt-get install -y --force-yes --no-install-recommends zulu-8 mongodb redis-server redis-tools wget ca-certificates unzip procps
+	apt-get install -y --force-yes --no-install-recommends zulu-8 wget ca-certificates unzip
 
 # Install sbt
 RUN echo "Install sbt..." && \
@@ -24,24 +23,18 @@ RUN echo "Install sbt..." && \
 	echo 'sbt-plugin-releases: https://dl.bintray.com/sbt/sbt-plugin-releases/, [organization]/[module]/(scala_[scalaVersion]/)(sbt_[sbtVersion]/)[revision]/[type]s/[artifact](-[classifier]).[ext]' >> /root/.sbt/repositories && \
 	echo 'appadhoc: http://registry-prod.appadhoc.com:30080/repository/release/' >> /root/.sbt/repositories
 
-# Install JProfiler - uncomment this when we need performance profiling.
-#RUN echo "Install JProfiler..." && \
-#	wget -c http://download-keycdn.ej-technologies.com/jprofiler/jprofiler_linux_9_2.sh && bash jprofiler_linux_9_2.sh -q
-
 # Config Timezone
 RUN echo "Asia/Harbin" > /etc/timezone && dpkg-reconfigure --frontend noninteractive tzdata
 
-# Build and Test
+# Build
 ONBUILD COPY ./build.sbt /data/build.sbt
 ONBUILD COPY ./project /data/project
 ONBUILD COPY ./script /data/script
 ONBUILD RUN (if [ -e /data/script/sbt-repositories ] ; then cp /data/script/sbt-repositories /root/.sbt/repositories ; fi) && \
 	cd /data && sbt -Dsbt.override.build.repos=true update
 ONBUILD COPY . /data
-ONBUILD RUN echo "Build and test..." && \
-	service mongodb restart && service redis-server restart && \
-	cd /data && sbt -Dsbt.override.build.repos=true -Dfile.encoding=UTF-8 test && \
-	sbt -Dsbt.override.build.repos=true -Dfile.encoding=UTF-8 dist && \
+ONBUILD RUN echo "Build..." && \
+	cd /data && sbt -Dsbt.override.build.repos=true -Dfile.encoding=UTF-8 dist && \
 	cd /data/target/universal/ && unzip -o *.zip
 
 # Install
@@ -49,6 +42,9 @@ ONBUILD RUN cd /data && export proj_name=`sbt settings name | tail -1 | cut -d' 
 	mkdir -p /release/${proj_name} && mv /data/target/universal/${proj_name}* /release && \
 	cd /release/${proj_name}*/bin && \
 	ln -s `pwd`/${proj_name} /entrypoint
+
+# Cleanup
+ONBUILD RUN rm -r /data
 
 # Run
 ONBUILD CMD ["/entrypoint", "-Dconfig.resource=prod.conf", "-Dfile.encoding=UTF8"]
